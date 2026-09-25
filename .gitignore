@@ -1,0 +1,24 @@
+node_modules/
+.env
+*.env
+.env.*
+!.env.example
+
+# Käyttäjän oma laitekonfiguraatio (sisältää paikalliset IP:t)
+config/devices.json
+
+# Kerätty mittaridata
+data/*.csv
+!data/.gitkeep
+
+temp/
+.DS_Store
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/
+.vscode/
+.idea/

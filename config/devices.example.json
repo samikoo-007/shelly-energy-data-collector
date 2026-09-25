@@ -1,0 +1,22 @@
+{
+  "em_channel": 0,
+  "devices": [
+    {
+      "name": "HeatPump",
+      "ip": "192.168.1.10",
+      "fetch_mode": "full",
+      "comment": "full = 6 h aikavälihaut (suositeltu). Vaihda ip omaan osoitteeseen."
+    },
+    {
+      "name": "MainBuilding",
+      "ip": "192.168.1.11",
+      "fetch_mode": "full"
+    },
+    {
+      "name": "Spa",
+      "ip": "192.168.1.12",
+      "fetch_mode": "hourly",
+      "comment": "hourly = puuttuvat tunnit yksi kerrallaan (epävakaille laitteille)"
+    }
+  ]
+}
