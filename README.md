@@ -17,7 +17,7 @@ Skripti on kehitetty ja **testattu tuotantokäytössä** seuraavalla mallilla:
 Testattu kolmivaiheprofiililla (`profile: triphase`), firmware 2.0.0 / 2.0.1.
 
 - Käyttää Shellyn **EM Data** -CSV-historiaa (typ. ~7–10 pv laitteella).
-- Olettaa **52-sarakkeisen** CSV-rivin ja muuntaa sen 20 sarakkeeseen (vaiheet A/B/C + N).
+- Tallentaa **kaikki 52 natiivia saraketta** sellaisenaan (`add_keys=true`) — ei kenttien pudotusta.
 - Muut Shelly EM / 3EM -mallit, joissa on sama `/emdata/<n>/data.csv` -rajapinta ja vastaava sarakerakenne, *saattavat* toimia — niitä ei ole vielä varmennettu tässä paketissa.
 
 > Jos laitteesi EI ole 3EM-63 Gen3, tarkista ensin:  
@@ -158,11 +158,33 @@ data/
 - Ensilataus hakee tyypillisesti ~7–10 vuorokautta (mitä laite vielä pitää muistissaan).
 - Seuraavat ajot jatkavat viimeisestä timestampista → nopea päivitys.
 
-### CSV-sarakkeet (20)
+### CSV-sarakkeet (52 natiivia)
 
-`timestamp`, vaihe A/B/C: energia, teho (avg/max/min), virta, jännite, sekä `n_avg_current`.
+Skripti tallentaa Shellyn `/emdata/.../data.csv?add_keys=true` -vastauksen **sellaisenaan** (ei kenttien pudotusta eikä laskettuja `*_avg_active_power` -kenttiä).
 
-`a_avg_active_power` lasketaan energiasta (`Wh/min × 60 ≈ W`).
+| Ryhmä | Kentät |
+|---|---|
+| Aika | `timestamp` |
+| Vaihe A/B/C | `*_total_act_energy`, `*_fund_act_energy`, `*_total_act_ret_energy`, `*_fund_act_ret_energy`, `*_lag_react_energy`, `*_lead_react_energy`, `*_max/min_act_power`, `*_max/min_aprt_power`, `*_max/min/avg_voltage`, `*_max/min/avg_current` |
+| Neutraali | `n_max_current`, `n_min_current`, `n_avg_current` |
+
+15 min -kooste käyttää samoja 52 saraketta: energiat summataan, `*_max_*` → max, `*_min_*` → min, keskiarvokentät keskiarvoistetaan.
+
+### Esimerkkidata (repossa)
+
+Valmis natiivi CSV yhdeltä testilaitteelta (~7 vuorokautta, 1 min):
+
+[`examples/sample_shelly3em63_gen3_7d.csv`](examples/sample_shelly3em63_gen3_7d.csv)
+
+```bash
+# Header + rivimäärä
+head -n 1 examples/sample_shelly3em63_gen3_7d.csv | tr ',' '\n' | wc -l   # → 52
+wc -l examples/sample_shelly3em63_gen3_7d.csv                            # → ~10082
+```
+
+Tiedosto ei sisällä IP-osoitteita eikä laitenimiä — vain mittausarvoja.
+
+> Jos sinulla on vanhoja **20-sarakkeisia** CSV:itä, skripti arkistoi ne automaattisesti (`*_legacy_narrow.csv`) ja hakee historian uudelleen natiivissa 52-sarakkeisessa muodossa.
 
 ---
 
@@ -218,6 +240,8 @@ shelly-energy-data-collector/
 │   └── devices.json           # sinun IP:t (ei repossa)
 ├── data/                      # CSV-historia (ei repossa)
 │   └── .gitkeep
+├── examples/
+│   └── sample_shelly3em63_gen3_7d.csv   # natiivi 52-sarake-esimerkki (~7 pv)
 └── scripts/
     ├── config_loader.py
     └── paivita_shelly_data.py

@@ -5,8 +5,9 @@ Shelly 3EM-63 Gen3 — inkrementaalinen kulutusdatan haku
 Testattu malli: Shelly 3EM-63 Gen3 (S3EM-003CXCEU63), Gen 3, triphase.
 
 - Hakee paikallisen HTTP-rajapinnan /emdata/<channel>/data.csv
-- Tallentaa kuukausittain: YYYY-MM_lokaali_<Nimi>_historia.csv (1 min)
-- Aggregoi: YYYY-MM_15m_lokaali_<Nimi>_historia.csv
+- Tallentaa kaikki 52 natiivia saraketta kuukausittain:
+  YYYY-MM_lokaali_<Nimi>_historia.csv (1 min)
+- Aggregoi: YYYY-MM_15m_lokaali_<Nimi>_historia.csv (samat 52 saraketta)
 - PING pre-flight ennen HTTP-hakuja
 - Laitteet: config/devices.json (ei salaisuuksia repossä)
 """
@@ -30,17 +31,44 @@ CHUNK_S = 6 * 3600          # full-tila: max 6 h / HTTP-kutsu (välttää Connec
 HOURLY_TAUKO_S = 2
 CHUNK_TAUKO_S = 0.4
 LAITE_HISTORIA_PAIVIA = 10
+SARAKKEITA = 52
 
-NEW_HEADER = [
+# Shelly 3EM-63 Gen3 /emdata CSV (add_keys=true) — natiivit kentät sellaisenaan
+NATIVE_HEADER = [
     "timestamp",
-    "a_total_act_energy", "a_avg_active_power", "a_max_act_power", "a_min_act_power",
-    "a_avg_current", "a_avg_voltage",
-    "b_total_act_energy", "b_avg_active_power", "b_max_act_power", "b_min_act_power",
-    "b_avg_current", "b_avg_voltage",
-    "c_total_act_energy", "c_avg_active_power", "c_max_act_power", "c_min_act_power",
-    "c_avg_current", "c_avg_voltage",
-    "n_avg_current",
+    "a_total_act_energy", "a_fund_act_energy", "a_total_act_ret_energy", "a_fund_act_ret_energy",
+    "a_lag_react_energy", "a_lead_react_energy",
+    "a_max_act_power", "a_min_act_power", "a_max_aprt_power", "a_min_aprt_power",
+    "a_max_voltage", "a_min_voltage", "a_avg_voltage",
+    "a_max_current", "a_min_current", "a_avg_current",
+    "b_total_act_energy", "b_fund_act_energy", "b_total_act_ret_energy", "b_fund_act_ret_energy",
+    "b_lag_react_energy", "b_lead_react_energy",
+    "b_max_act_power", "b_min_act_power", "b_max_aprt_power", "b_min_aprt_power",
+    "b_max_voltage", "b_min_voltage", "b_avg_voltage",
+    "b_max_current", "b_min_current", "b_avg_current",
+    "c_total_act_energy", "c_fund_act_energy", "c_total_act_ret_energy", "c_fund_act_ret_energy",
+    "c_lag_react_energy", "c_lead_react_energy",
+    "c_max_act_power", "c_min_act_power", "c_max_aprt_power", "c_min_aprt_power",
+    "c_max_voltage", "c_min_voltage", "c_avg_voltage",
+    "c_max_current", "c_min_current", "c_avg_current",
+    "n_max_current", "n_min_current", "n_avg_current",
 ]
+
+
+def _agg_mode(col_name: str) -> str:
+    """Miten 15 min -kooste lasketaan natiivikentälle."""
+    if col_name == "timestamp":
+        return "ts"
+    if "_max_" in col_name or col_name.startswith(("a_max", "b_max", "c_max", "n_max")):
+        return "max"
+    if "_min_" in col_name or col_name.startswith(("a_min", "b_min", "c_min", "n_min")):
+        return "min"
+    if "energy" in col_name:
+        return "sum"
+    return "avg"
+
+
+AGG_MODES = [_agg_mode(c) for c in NATIVE_HEADER]
 
 
 def lataa_url(url: str, timeout: int = 120, uudelleenyritykset: int = 2):
@@ -65,23 +93,40 @@ def parsii_data_rivit(raw_data: str) -> list[str]:
     ]
 
 
-def transform_row(original_row: list[str]):
-    """52-sarakkeinen Shelly-rivi → 20 saraketta."""
-    r = original_row
-    try:
-        ts = r[0]
-        a_e = float(r[1])
-        b_e = float(r[17])
-        c_e = float(r[33])
-        return [
-            ts,
-            round(a_e, 4), round(a_e * 60, 2), r[7], r[8], r[16], r[13],
-            round(b_e, 4), round(b_e * 60, 2), r[23], r[24], r[32], r[29],
-            round(c_e, 4), round(c_e * 60, 2), r[39], r[40], r[48], r[45],
-            r[51],
-        ]
-    except (ValueError, IndexError):
+def normalisoi_rivi(original_row: list[str]):
+    """Palauttaa Shellyn natiivin 52-sarakkeisen rivin tai None."""
+    if len(original_row) < SARAKKEITA:
         return None
+    r = original_row[:SARAKKEITA]
+    try:
+        int(r[0])
+    except ValueError:
+        return None
+    return r
+
+
+def varmista_natiivi_tiedosto(tiedosto_1m: str) -> bool:
+    """Jos vanha 20-sarakkeinen tiedosto on olemassa, arkistoi se ennen uutta formaattia."""
+    if not os.path.exists(tiedosto_1m):
+        return True
+    with open(tiedosto_1m, encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+    if header == NATIVE_HEADER:
+        return True
+    bak = tiedosto_1m.replace(".csv", "_legacy_narrow.csv")
+    n = 1
+    while os.path.exists(bak):
+        bak = tiedosto_1m.replace(".csv", f"_legacy_narrow_{n}.csv")
+        n += 1
+    os.replace(tiedosto_1m, bak)
+    # Vanha 15min-kooste pois tieltä
+    tiedosto_15m = tiedosto_1m.replace("_lokaali_", "_15m_lokaali_")
+    if os.path.exists(tiedosto_15m):
+        bak15 = tiedosto_15m.replace(".csv", "_legacy_narrow.csv")
+        os.replace(tiedosto_15m, bak15)
+    print(f"    ♻️  Vanha kapea CSV arkistoitu → {os.path.basename(bak)}")
+    return True
 
 
 def paivita_15min_tiedosto(file_1m: str, file_15m: str) -> None:
@@ -91,9 +136,13 @@ def paivita_15min_tiedosto(file_1m: str, file_15m: str) -> None:
     rows_1m = []
     with open(file_1m, encoding="utf-8") as f:
         reader = csv.reader(f)
-        next(reader, None)
+        header = next(reader, None)
+        if header != NATIVE_HEADER:
+            print(f"    ⚠️  Ohitetaan 15min-kooste (odottamaton header): {os.path.basename(file_1m)}")
+            return
         for r in reader:
-            rows_1m.append(r)
+            if len(r) >= SARAKKEITA:
+                rows_1m.append(r[:SARAKKEITA])
 
     if not rows_1m:
         return
@@ -108,29 +157,34 @@ def paivita_15min_tiedosto(file_1m: str, file_15m: str) -> None:
     for b_ts in sorted(blocks.keys()):
         b_rows = blocks[b_ts]
         try:
-            row = [str(b_ts)]
-            for i in range(1, 19):
-                vals = [float(r[i]) for r in b_rows if r[i]]
+            row: list = [str(b_ts)]
+            for i in range(1, SARAKKEITA):
+                vals = []
+                for r in b_rows:
+                    try:
+                        if r[i] != "":
+                            vals.append(float(r[i]))
+                    except (ValueError, IndexError):
+                        continue
                 if not vals:
                     row.append("")
                     continue
-                if i in (1, 7, 13):
-                    row.append(round(sum(vals), 4))
-                elif i in (3, 9, 15):
-                    row.append(round(max(vals), 2))
-                elif i in (4, 10, 16):
-                    row.append(round(min(vals), 2))
+                mode = AGG_MODES[i]
+                if mode == "sum":
+                    row.append(round(sum(vals), 6))
+                elif mode == "max":
+                    row.append(round(max(vals), 4))
+                elif mode == "min":
+                    row.append(round(min(vals), 4))
                 else:
-                    row.append(round(sum(vals) / len(vals), 3))
-            n_vals = [float(r[19]) for r in b_rows if r[19]]
-            row.append(round(sum(n_vals) / len(n_vals), 3) if n_vals else "")
+                    row.append(round(sum(vals) / len(vals), 4))
             agg_rows.append(row)
         except Exception:
             continue
 
     with open(file_15m, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(NEW_HEADER)
+        writer.writerow(NATIVE_HEADER)
         writer.writerows(agg_rows)
 
 
@@ -156,9 +210,20 @@ def lue_viimeisin_timestamp(tiedosto: str):
     return viimeisin
 
 
+def _1m_tiedostot(nimi: str) -> list[str]:
+    """Kuukausittaiset 1 min -tiedostot (ei 15min / legacy)."""
+    out = []
+    for tiedosto in glob.glob(os.path.join(DATA_HAKEMISTO, f"*_lokaali_{nimi}_historia.csv")):
+        base = os.path.basename(tiedosto)
+        if "_15m_" in base or "_legacy_" in base:
+            continue
+        out.append(tiedosto)
+    return out
+
+
 def lue_viimeisin_timestamp_laitteelta(nimi: str):
     viimeisin = None
-    for tiedosto in glob.glob(os.path.join(DATA_HAKEMISTO, f"*_lokaali_{nimi}_historia.csv")):
+    for tiedosto in _1m_tiedostot(nimi):
         ts = lue_viimeisin_timestamp(tiedosto)
         if ts is not None and (viimeisin is None or ts > viimeisin):
             viimeisin = ts
@@ -167,7 +232,7 @@ def lue_viimeisin_timestamp_laitteelta(nimi: str):
 
 def lue_timestampit_laitteelta(nimi: str) -> list[int]:
     ts_list = []
-    for tiedosto in glob.glob(os.path.join(DATA_HAKEMISTO, f"*_lokaali_{nimi}_historia.csv")):
+    for tiedosto in _1m_tiedostot(nimi):
         with open(tiedosto, encoding="utf-8") as f:
             for rivi in f:
                 try:
@@ -175,6 +240,12 @@ def lue_timestampit_laitteelta(nimi: str) -> list[int]:
                 except ValueError:
                     continue
     return sorted(ts_list)
+
+
+def arkistoi_legacy_laitteelta(nimi: str) -> None:
+    """Arkistoi vanhat kapeat (≠ 52 natiivia) CSV:t ennen uutta hakua."""
+    for tiedosto in _1m_tiedostot(nimi):
+        varmista_natiivi_tiedosto(tiedosto)
 
 
 def etsi_puuttuvat_tunnit(nimi: str, loppu_ts: int) -> list[int]:
@@ -210,13 +281,14 @@ def tallenna_uudet_rivit(nimi: str, data_rivit: list[str]) -> dict:
     paivitetyt: dict[str, int] = {}
     for month, rivit in kuukausittain.items():
         tiedosto_1m = os.path.join(DATA_HAKEMISTO, f"{month}_lokaali_{nimi}_historia.csv")
+        varmista_natiivi_tiedosto(tiedosto_1m)
         viimeisin_ts = lue_viimeisin_timestamp(tiedosto_1m)
 
         uudet = []
         for r in rivit:
             ts = int(r[0])
             if viimeisin_ts is None or ts > viimeisin_ts:
-                t_row = transform_row(r)
+                t_row = normalisoi_rivi(r)
                 if t_row:
                     uudet.append(t_row)
 
@@ -225,7 +297,7 @@ def tallenna_uudet_rivit(nimi: str, data_rivit: list[str]) -> dict:
             with open(tiedosto_1m, "a", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
                 if not file_exists:
-                    writer.writerow(NEW_HEADER)
+                    writer.writerow(NATIVE_HEADER)
                 writer.writerows(uudet)
             paivitetyt[month] = paivitetyt.get(month, 0) + len(uudet)
     return paivitetyt
@@ -236,6 +308,7 @@ def paivita_laite_full(nimi: str, ip: str, channel: int) -> bool:
 
     Yksi iso /data.csv-kaato kaatuu helposti (Connection reset) → aikavälihaut.
     """
+    arkistoi_legacy_laitteelta(nimi)
     nyt = int(time.time())
     viimeisin = lue_viimeisin_timestamp_laitteelta(nimi)
     if viimeisin is None:
@@ -279,6 +352,7 @@ def paivita_laite_full(nimi: str, ip: str, channel: int) -> bool:
 
 
 def paivita_laite_hourly(nimi: str, ip: str, channel: int) -> bool:
+    arkistoi_legacy_laitteelta(nimi)
     nyt = int(time.time())
     haettavat = etsi_puuttuvat_tunnit(nimi, nyt)
 
