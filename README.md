@@ -1,8 +1,27 @@
 # Shelly Energy Data Collector
 
-Kerää Shelly EM / 3EM -kulutusmittareiden historian paikallisesta verkosta CSV-tiedostoihin. Ei vaadi pilvitunnuksia: data haetaan suoraan laitteen IP-osoitteesta.
+Kerää Shelly-kulutusmittareiden historian paikallisesta verkosta CSV-tiedostoihin. Ei vaadi pilvitunnuksia: data haetaan suoraan laitteen IP-osoitteesta.
 
 **Vaatimukset:** Python 3.9+, sama verkko (tai VPN) kuin Shelly-laitteet.
+
+---
+
+## Tuettu / testattu mittarimalli
+
+Skripti on kehitetty ja **testattu tuotantokäytössä** seuraavalla mallilla:
+
+| Tuote | Model-koodi | Gen | Rajapinta |
+|---|---|---|---|
+| **Shelly 3EM-63 Gen3** | `S3EM-003CXCEU63` | 3 | `/emdata/0/data.csv` (paikallinen HTTP) |
+
+Testattu kolmivaiheprofiililla (`profile: triphase`), firmware 2.0.0 / 2.0.1.
+
+- Käyttää Shellyn **EM Data** -CSV-historiaa (typ. ~7–10 pv laitteella).
+- Olettaa **52-sarakkeisen** CSV-rivin ja muuntaa sen 20 sarakkeeseen (vaiheet A/B/C + N).
+- Muut Shelly EM / 3EM -mallit, joissa on sama `/emdata/<n>/data.csv` -rajapinta ja vastaava sarakerakenne, *saattavat* toimia — niitä ei ole vielä varmennettu tässä paketissa.
+
+> Jos laitteesi EI ole 3EM-63 Gen3, tarkista ensin:  
+> `curl -s "http://<ip>/shelly"` → kentän `model` pitäisi olla `S3EM-003CXCEU63` (tai vastaava Gen3 EM-data -laite).
 
 ---
 

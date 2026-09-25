@@ -1,4 +1,5 @@
 {
+  "_info": "Testattu: Shelly 3EM-63 Gen3 (model S3EM-003CXCEU63). Vaihda name + ip omiin laitteisiin.",
   "em_channel": 0,
   "devices": [
     {

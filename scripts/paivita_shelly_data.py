@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Shelly EM / 3EM — inkrementaalinen kulutusdatan haku
-====================================================
+Shelly 3EM-63 Gen3 — inkrementaalinen kulutusdatan haku
+=======================================================
+Testattu malli: Shelly 3EM-63 Gen3 (S3EM-003CXCEU63), Gen 3, triphase.
+
 - Hakee paikallisen HTTP-rajapinnan /emdata/<channel>/data.csv
 - Tallentaa kuukausittain: YYYY-MM_lokaali_<Nimi>_historia.csv (1 min)
 - Aggregoi: YYYY-MM_15m_lokaali_<Nimi>_historia.csv
@@ -361,7 +363,7 @@ def main() -> None:
     laitteet = laitteet_dict(cfg)
 
     print("═" * 55)
-    print("  Shelly EM — kulutusdatan haku & 15 min kooste")
+    print("  Shelly 3EM-63 Gen3 — kulutusdatan haku & 15 min kooste")
     print(f"  Aika: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
     print("═" * 55)
 
